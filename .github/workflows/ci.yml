@@ -83,7 +83,7 @@ jobs:
         run: terraform init
         working-directory: ./terraform
 
-      - name: Terraform Apply
-        run: terraform apply -input=false tfplan
-        working-directory: ./terraform
+      # - name: Terraform Apply
+      #   run: terraform apply -input=false tfplan
+      #   working-directory: ./terraform
 

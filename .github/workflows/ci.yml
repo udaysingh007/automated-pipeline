@@ -13,9 +13,6 @@ jobs:
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: terraform
 
     steps:
       - name: Checkout repository
@@ -35,12 +32,15 @@ jobs:
 
       - name: Terraform Init
         run: terraform init
+        working-directory: ./terraform
 
       - name: Terraform Validate
         run: terraform validate
+        working-directory: ./terraform
 
       - name: Terraform Plan
         run: terraform plan -out=tfplan
+        working-directory: ./terraform
 
       - name: Upload Plan File
         uses: actions/upload-artifact@v3
@@ -54,13 +54,9 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://console.aws.amazon.com/eks/home  # Optional link
-    defaults:
-      run:
-        working-directory: terraform
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Setup Terraform
@@ -75,7 +71,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-west-2
 
-      - name: Download Plan
+      - name: Download Plan File
         uses: actions/download-artifact@v3
         with:
           name: tfplan
@@ -83,6 +79,9 @@ jobs:
 
       - name: Terraform Init
         run: terraform init
+        working-directory: ./terraform
 
-      - name: Terraform Apply (Manual Approval Required)
+      - name: Terraform Apply
         run: terraform apply -input=false tfplan
+        working-directory: ./terraform
+

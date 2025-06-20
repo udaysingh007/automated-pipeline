@@ -1,9 +1,10 @@
-output "argocd_ingress_host" {
-  value = "argocd.example.com"
-}
-
 output "nginx_ingress_public_ip" {
   value = data.kubernetes_service.nginx_ingress_controller.status[0].load_balancer[0].ingress[0].ip
+}
+
+output "kubeconfig_context" {
+  value = module.eks.cluster_name
+  description = "The context name to use with kubectl (e.g., kubectl --context=<this>)"
 }
 
 # output "cluster_endpoint" {

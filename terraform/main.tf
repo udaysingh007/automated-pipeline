@@ -96,3 +96,15 @@ EOF
   depends_on = [module.eks, helm_release.argo_workflows]
 }
 
+resource "null_resource" "update_kubeconfig" {
+  depends_on = [module.eks]
+
+  provisioner "local-exec" {
+    command = <<EOT
+aws eks update-kubeconfig \
+  --region us-west-2 \
+  --name ${module.eks.cluster_name} \
+  --alias ${module.eks.cluster_name}
+EOT
+  }
+}

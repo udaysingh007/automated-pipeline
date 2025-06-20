@@ -2,6 +2,10 @@ output "argocd_ingress_host" {
   value = "argocd.example.com"
 }
 
+output "nginx_ingress_public_ip" {
+  value = data.kubernetes_service.nginx_ingress_controller.status[0].load_balancer[0].ingress[0].ip
+}
+
 # output "cluster_endpoint" {
 #   value = aws_eks_cluster.eks.endpoint
 # }

@@ -18,6 +18,12 @@ resource "helm_release" "nginx_ingress" {
   repository       = "https://kubernetes.github.io/ingress-nginx"
   chart            = "ingress-nginx"
   version          = "4.10.0"
+  values = [<<EOF
+controller:
+  service:
+    type: LoadBalancer
+EOF
+  ]
 }
 
 resource "kubernetes_ingress_v1" "argocd_ingress" {
@@ -31,10 +37,9 @@ resource "kubernetes_ingress_v1" "argocd_ingress" {
   spec {
     ingress_class_name = "nginx"
     rule {
-      host = "argocd.example.com"
       http {
         path {
-          path      = "/"
+          path      = "/argocd"
           path_type = "Prefix"
           backend {
             service {
@@ -48,6 +53,5 @@ resource "kubernetes_ingress_v1" "argocd_ingress" {
       }
     }
   }
-
   depends_on = [helm_release.nginx_ingress, helm_release.argocd]
 }

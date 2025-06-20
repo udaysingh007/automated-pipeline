@@ -5,4 +5,5 @@ tfplan
 tfplan.json
 terraform.tfstate.backup
 .terraform.tfstate.lock.info
-
+tfplan.binary
+plan.json

@@ -17,7 +17,7 @@ module "eks" {
   cluster_endpoint_private_access = true
   
   # Manage aws-auth ConfigMap
-  manage_aws_auth_configmap = true
+  # manage_aws_auth_configmap = true
 
   # EKS Managed Node Groups
   eks_managed_node_groups = {
@@ -44,6 +44,7 @@ module "eks" {
       }
     }
   }
+  
 
   # Additional security group rules for communication
   cluster_security_group_additional_rules = {

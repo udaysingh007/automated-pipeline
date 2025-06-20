@@ -83,6 +83,14 @@ jobs:
         run: terraform init
         working-directory: ./terraform
 
+      # - name: Terraform Apply for EKS
+      #   run: terraform apply -target=module.eks -input=false
+      #   working-directory: ./terraform
+
+      # - name: setup kubeconfig
+      #   run: aws eks update-kubeconfig --region us-east-1 --name pipeline-sandbox
+      #   working-directory: ./terraform
+
       # - name: Terraform Apply
       #   run: terraform apply -input=false tfplan
       #   working-directory: ./terraform

@@ -1,3 +1,8 @@
+###################################################################
+#
+# launching the entire automated pipeline sandbox environment
+#
+###################################################################
 module "vpc" {
   source = "./modules/vpc"
 }

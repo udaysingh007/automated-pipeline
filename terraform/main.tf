@@ -4,13 +4,17 @@
 #
 ###################################################################
 module "vpc" {
-  source = "./modules/vpc"
+  source       = "./modules/vpc"
+  cluster_name = var.cluster_name
 }
 
 module "eks" {
   source             = "./modules/eks"
   vpc_id             = module.vpc.vpc_id
-  subnet_ids         = module.vpc.public_subnet_ids
+  # CRITICAL FIX: Use ALL subnets (public + private) for control plane
+  # but worker nodes will be placed in private subnets
+  subnet_ids         = module.vpc.all_subnet_ids
+  private_subnet_ids = module.vpc.private_subnet_ids
   cluster_name       = var.cluster_name
   node_instance_type = var.node_instance_type
 }

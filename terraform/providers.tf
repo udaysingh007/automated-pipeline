@@ -1,17 +1,5 @@
-module "vpc" {
-  source = "./modules/vpc"
-}
-
-module "eks" {
-  source       = "./modules/eks"
-  vpc_id       = module.vpc.vpc_id
-  subnet_ids   = module.vpc.public_subnet_ids
-  cluster_name = var.cluster_name
-  node_instance_type = var.node_instance_type
-}
-
-data "aws_eks_cluster_auth" "cluster" {
-  name = module.eks.cluster_name
+provider "aws" {
+  region = var.region
 }
 
 provider "kubernetes" {
@@ -26,9 +14,4 @@ provider "helm" {
     cluster_ca_certificate = base64decode(module.eks.cluster_ca)
     token                  = data.aws_eks_cluster_auth.cluster.token
   }
-}
-
-module "argocd" {
-  source     = "./modules/argocd"
-  depends_on = [module.eks]
 }

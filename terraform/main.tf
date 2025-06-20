@@ -102,7 +102,7 @@ resource "helm_release" "argo_events" {
   namespace  = "argo"
   repository = "https://argoproj.github.io/argo-helm"
   chart      = "argo-events"
-  version    = "2.6.0"
+  version    = "2.4.15"
   values = [<<EOF
 webhook:
   service:

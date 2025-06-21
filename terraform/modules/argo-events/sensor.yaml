@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: gitea-sensor
+  namespace: argo-events
+spec:
+  dependencies:
+    - name: gitea-dep
+      eventSourceName: gitea
+      eventName: gitea
+  triggers:
+    - template:
+        name: workflow-trigger
+        argoWorkflow:
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: gitea-workflow-
+              spec:
+                entrypoint: build-and-push
+                templates:
+                  - name: build-and-push
+                    container:
+                      image: docker:24
+                      command: [sh, -c]
+                      args:
+                        - |
+                          echo "TODO: Replace with docker build + push logic"

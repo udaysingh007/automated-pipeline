@@ -8,6 +8,28 @@ variable "cluster_name" {
   default     = "pipeline-sandbox"
 }
 
+variable "ecr_repo_name" {
+  description = "Name of the EKS cluster"
+  type        = string
+  default     = "pipeline-sandbox-ecr"
+}
+
+variable "gitea_repo_name" {
+  description = "Name of the EKS cluster"
+  type        = string
+  default     = "gitea-repo1"
+}
+
+variable "environment" {
+  description = "Deployment environment (e.g., dev, prod)"
+  type        = string
+  default     = "dev"
+  validation {
+    condition     = contains(["dev", "stage", "prod"], var.environment)
+    error_message = "Environment must be dev, stage, or prod"
+  }
+}
+
 variable "node_instance_type" {
   default = "t3.medium"
 }

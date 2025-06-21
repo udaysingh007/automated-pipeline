@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: go-app-build-
+spec:
+  entrypoint: build-and-push
+  templates:
+    - name: build-and-push
+      container:
+        image: docker:24
+        command: [sh, -c]
+        args:
+          - |
+            apk add --no-cache git curl bash build-base docker-cli && \
+            git clone "${repo_url}" && \
+            cd "$(basename ${repo_url} .git)" && \
+            docker build -t ${ecr_repo_url}:latest . && \
+            aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${ecr_repo_url} && \
+            docker push ${ecr_repo_url}:latest
+        volumeMounts:
+          - name: docker-sock
+            mountPath: /var/run/docker.sock
+  volumes:
+    - name: docker-sock
+      hostPath:
+        path: /var/run/docker.sock

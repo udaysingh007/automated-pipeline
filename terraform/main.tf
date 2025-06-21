@@ -19,6 +19,13 @@ module "eks" {
   node_instance_type = var.node_instance_type
 }
 
+module "ecr" {
+  source        = "./modules/ecr"
+  ecr_repo_name = var.ecr_repo_name
+  environment   = var.environment
+}
+
+
 data "aws_eks_cluster_auth" "cluster" {
   name = module.eks.cluster_name
 }
@@ -125,4 +132,59 @@ aws eks update-kubeconfig \
   --alias ${module.eks.cluster_name}
 EOT
   }
+}
+
+module "gitea_repo" {
+  source         = "./modules/gitea-repo"
+  gitea_user     = module.gitea.admin_username
+  gitea_password = var.gitea_admin_password
+  gitea_base_url = module.gitea.gitea_url
+  repo_name      = var.gitea_repo_name
+
+  depends_on = [module.gitea]
+}
+
+module "gitea_token" {
+  source         = "./modules/gitea-token"
+  gitea_user     = module.gitea.admin_username
+  gitea_password = var.gitea_admin_password
+  gitea_base_url = module.gitea.gitea_url
+  repo_name      = var.gitea_repo_name
+
+  depends_on = [module.gitea_repo]
+}
+
+module "argocd_secret" {
+  source         = "./modules/argo-secrets"
+  gitea_user     = module.gitea.admin_username
+  gitea_token    = module.gitea_token.gitea_token
+  gitea_base_url = module.gitea.gitea_url
+  repo_user      = module.gitea.admin_username
+  repo_name      = var.gitea_repo_name
+
+  depends_on = [module.gitea_token]
+}
+
+module "argocd_app" {
+  source         = "./modules/argo-application"
+  gitea_user     = module.gitea.admin_username
+  gitea_token    = module.gitea_token.gitea_token
+  gitea_base_url = module.gitea.gitea_url
+  repo_user      = module.gitea.admin_username
+  repo_name      = var.gitea_repo_name
+
+  depends_on = [module.argocd_secret]
+}
+
+module "argo_events" {
+  source            = "./modules/argo-events"
+  gitea_user        = module.gitea.admin_username
+  gitea_token       = module.gitea_token.gitea_token
+  gitea_base_url    = module.gitea.gitea_url
+  repo_name         = var.gitea_repo_name
+  aws_region        = var.region
+  ecr_repo_url      = module.ecr.ecr_repository_url
+  gitea_webhook_url = module.gitea.gitea_url # TBD - patch-me
+
+  depends_on = [module.argocd_app]
 }

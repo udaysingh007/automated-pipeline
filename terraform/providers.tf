@@ -27,6 +27,10 @@ terraform {
       source  = "hashicorp/cloudinit"
       version = ">= 2.0.0"
     }
+    kubectl = {
+      source  = "gavinbunney/kubectl"
+      version = "~> 1.14.0" # You can pin to a version or use a compatible range
+    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.0"

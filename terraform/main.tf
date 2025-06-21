@@ -9,8 +9,8 @@ module "vpc" {
 }
 
 module "eks" {
-  source             = "./modules/eks"
-  vpc_id             = module.vpc.vpc_id
+  source = "./modules/eks"
+  vpc_id = module.vpc.vpc_id
   # CRITICAL FIX: Use ALL subnets (public + private) for control plane
   # but worker nodes will be placed in private subnets
   subnet_ids         = module.vpc.all_subnet_ids
@@ -33,52 +33,52 @@ provider "helm" {
   }
 }
 
-# provider "kubernetes" {
-#   host                   = module.eks.cluster_endpoint
-#   cluster_ca_certificate = base64decode(module.eks.cluster_ca)
-#   token                  = data.aws_eks_cluster_auth.cluster.token
-# }
-
-# provider "helm" {
-#   alias = "eks"
-
-#   kubernetes {
-#     host                   = module.eks.cluster_endpoint
-#     cluster_ca_certificate = base64decode(module.eks.cluster_ca)
-#     token                  = data.aws_eks_cluster_auth.cluster.token
-#   }
-# }
-
 module "argocd" {
   source     = "./modules/argocd"
   depends_on = [module.eks]
 }
 
-data "kubernetes_service" "nginx_ingress_controller" {
-  metadata {
-    name      = "nginx-ingress-controller"
-    namespace = "ingress-nginx"
-  }
-  depends_on = [module.argocd]
-}
+# Get available nodes for node selector
+data "kubernetes_nodes" "available" {}
 
-resource "helm_release" "gitea" {
-  name             = "gitea"
-  namespace        = "gitea"
-  create_namespace = true
-  repository       = "https://dl.gitea.io/charts/"
-  chart            = "gitea"
-  version          = "10.1.1"
-  values = [<<EOF
-postgresql:
-  enabled: true
-postgresql-ha:
-  enabled: false
-service:
-  http:
-    type: LoadBalancer
-EOF
-  ]
+# Deploy Gitea using the module
+module "gitea" {
+  source = "./modules/gitea"
+
+  # Basic configuration
+  namespace    = "gitea"
+  release_name = "gitea"
+
+  # Admin credentials - use secure values!
+  admin_username = "administrator001"
+  admin_password = var.gitea_admin_password # Define this in terraform.tfvars
+  admin_email    = "admin@yourdomain.com"
+
+  # Database credentials - use secure values!
+  postgres_username = "gitea"
+  postgres_password = var.postgres_password # Define this in terraform.tfvars
+  postgres_database = "gitea"
+
+  # Network configuration
+  domain       = "gitea.local"        # Update with your actual domain
+  root_url     = "http://gitea.local" # Update with your actual URL
+  service_type = "LoadBalancer"       # Change to LoadBalancer if you have external LB
+
+  # Storage configuration - matches your existing PVs
+  storage_class    = "local-fast"
+  gitea_pv_size    = "20Gi"
+  postgres_pv_size = "10Gi"
+
+  # Ingress configuration (enable if you have ingress controller)
+  ingress_enabled = false
+  ingress_class   = "nginx"
+
+  # Resource configuration
+  resource_limits_cpu      = "1000m"
+  resource_limits_memory   = "1Gi"
+  resource_requests_cpu    = "100m"
+  resource_requests_memory = "128Mi"
+
   depends_on = [module.eks]
 }
 

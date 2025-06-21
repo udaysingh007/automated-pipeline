@@ -13,7 +13,8 @@ jobs:
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    run:
+    defaults:
+      run:
         working-directory: ./terraform
     environment:
       name: dev
@@ -53,7 +54,8 @@ jobs:
     name: Terraform Apply
     needs: plan
     runs-on: ubuntu-latest
-    run:
+    defaults:
+      run:
         working-directory: ./terraform
     environment:
       name: dev

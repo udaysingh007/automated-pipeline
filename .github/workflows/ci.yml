@@ -13,6 +13,8 @@ jobs:
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
+    run:
+        working-directory: ./terraform
     environment:
       name: dev
 
@@ -34,15 +36,12 @@ jobs:
 
       - name: Terraform Init
         run: terraform init
-        working-directory: ./terraform
 
       - name: Terraform Validate
         run: terraform validate
-        working-directory: ./terraform
 
       - name: Terraform Plan
         run: terraform plan -out=tfplan
-        working-directory: ./terraform
 
       - name: Upload Plan File
         uses: actions/upload-artifact@v4
@@ -54,6 +53,8 @@ jobs:
     name: Terraform Apply
     needs: plan
     runs-on: ubuntu-latest
+    run:
+        working-directory: ./terraform
     environment:
       name: dev
 
@@ -81,17 +82,13 @@ jobs:
 
       - name: Terraform Init
         run: terraform init
-        working-directory: ./terraform
 
       # - name: Terraform Apply for EKS
       #   run: terraform apply -target=module.eks -input=false
-      #   working-directory: ./terraform
 
       # - name: setup kubeconfig
       #   run: aws eks update-kubeconfig --region us-east-1 --name pipeline-sandbox
-      #   working-directory: ./terraform
 
       # - name: Terraform Apply
       #   run: terraform apply -input=false tfplan
-      #   working-directory: ./terraform
 

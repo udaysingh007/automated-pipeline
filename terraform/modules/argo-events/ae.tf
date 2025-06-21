@@ -82,4 +82,3 @@ resource "null_resource" "create_gitea_webhook" {
   }
 }  
 
-templatefile("modules/argo-events/workflow.yaml.tmpl", {repo_url     = "https://gitea.example.com/user/repo.git", ecr_repo_url = "123456789.dkr.ecr.us-east-1.amazonaws.com/my-repo",region       = "us-east-1"})

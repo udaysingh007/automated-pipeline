@@ -35,8 +35,16 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
+      - name: Remove Terraform cache
+        run: |
+          rm -rf .terraform/
+          rm -f .terraform.lock.hcl
+
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -upgrade
+
+      - name: List terraform providers
+        run: terraform providers
 
       - name: Terraform Validate
         run: terraform validate

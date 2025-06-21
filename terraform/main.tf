@@ -39,7 +39,9 @@ module "argocd" {
 }
 
 # Get available nodes for node selector
-data "kubernetes_nodes" "available" {}
+data "kubernetes_nodes" "available" {
+  depends_on = [module.eks]
+}
 
 # Deploy Gitea using the module
 module "gitea" {

@@ -40,6 +40,9 @@ jobs:
           rm -rf .terraform/
           rm -f .terraform.lock.hcl
 
+      - name: List terraform providers
+        run: terraform providers
+
       - name: Terraform Init
         run: terraform init -upgrade
 

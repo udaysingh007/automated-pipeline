@@ -60,3 +60,12 @@ variable "target_node_name" {
   default     = "node-with-pv"
 }
 
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+
+  default = {
+    pkg = "pipeline-sandbox"
+    env = "dev"
+  }
+}

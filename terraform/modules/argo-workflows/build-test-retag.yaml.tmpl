@@ -1,0 +1,62 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: go-app-build-test-retag-
+spec:
+  entrypoint: build-test-retag
+  templates:
+  - name: build-test-retag
+    steps:
+    - - name: build-image
+        template: build-image
+    - - name: test-image
+        template: test-image
+        when: "{{steps.build-image.outputs.result}} == Succeeded"
+    - - name: retag-image
+        template: retag-image
+        when: "{{steps.test-image.outputs.result}} == Succeeded"
+
+  - name: build-image
+    container:
+      image: docker:24
+      command: [sh, -c]
+      args:
+        - |
+          apk add --no-cache git bash build-base docker-cli && \
+          git clone "${repo_url}" && \
+          cd "$(basename ${repo_url} .git)" && \
+          docker build -t ${ecr_repo_url}:latest . && \
+          aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${ecr_repo_url} && \
+          docker push ${ecr_repo_url}:latest
+    volumeMounts:
+      - name: docker-sock
+        mountPath: /var/run/docker.sock
+    outputs:
+      result: "Succeeded"
+
+  - name: test-image
+    container:
+      image: "${ecr_repo_url}:latest"
+      command: ["go", "test", "./..."]
+    outputs:
+      result: "Succeeded"
+
+  - name: retag-image
+    container:
+      image: docker:24
+      command: [sh, -c]
+      args:
+        - |
+          aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${ecr_repo_url} && \
+          docker pull ${ecr_repo_url}:latest && \
+          docker tag ${ecr_repo_url}:latest ${ecr_repo_url}:${tag} && \
+          docker push ${ecr_repo_url}:${tag}
+    volumeMounts:
+      - name: docker-sock
+        mountPath: /var/run/docker.sock
+
+  volumes:
+    - name: docker-sock
+      hostPath:
+        path: /var/run/docker.sock
+

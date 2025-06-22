@@ -188,3 +188,24 @@ module "argo_events" {
 
   depends_on = [module.argocd_app]
 }
+
+module "build_test_retag_workflow_v1" {
+  source         = "./modules/argo-workflows"
+  gitea_base_url = module.gitea.gitea_url
+  gitea_user     = module.gitea.admin_username
+  repo_name      = var.gitea_repo_name
+  ecr_repo_url   = module.ecr.ecr_repository_url
+  aws_region     = var.region
+  image_tag      = "v1.0.0"
+
+  depends_on = [module.argo_events]
+}
+
+module "ecr_event_bridge_to_argoworkflow" {
+  source        = "./modules/event-bridge"
+  ecr_repo_name = var.ecr_repo_name
+  aws_region    = var.region
+  tags          = var.tags
+
+  depends_on = [module.build_test_retag_workflow_v1]
+}

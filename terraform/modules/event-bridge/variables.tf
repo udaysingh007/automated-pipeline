@@ -14,3 +14,8 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "aws_creds_secret_name" {
+  description = "Kubernetes secret name that stores AWS credentials"
+  type        = string
+}

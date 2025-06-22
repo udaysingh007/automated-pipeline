@@ -8,10 +8,9 @@ spec:
     example:
       region: {{ .aws_region }}
       topicARN: {{ .sns_topic_arn }}
-      # optional: you can specify AWS creds if needed, or use IRSA / node role
-      # accessKey:
-      #   key: aws_access_key_id
-      #   name: aws-creds
-      # secretKey:
-      #   key: aws_secret_access_key
-      #   name: aws-creds
+      accessKey:
+        key: aws_access_key_id
+        name: {{ .aws_creds_secret_name }}
+      secretKey:
+        key: aws_secret_access_key
+        name: {{ .aws_creds_secret_name }}

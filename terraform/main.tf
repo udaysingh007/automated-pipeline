@@ -3,6 +3,18 @@
 # launching the entire automated pipeline sandbox environment.
 #
 ###################################################################
+# providers
+provider "kubernetes" {
+  config_path = "~/.kube/config"
+}
+
+provider "helm" {
+  kubernetes {
+    config_path = "~/.kube/config"
+  }
+}
+
+# resources and modules
 module "vpc" {
   source       = "./modules/vpc"
   cluster_name = var.cluster_name
@@ -25,19 +37,8 @@ module "ecr" {
   environment   = var.environment
 }
 
-
 data "aws_eks_cluster_auth" "cluster" {
   name = module.eks.cluster_name
-}
-
-provider "kubernetes" {
-  config_path = "~/.kube/config"
-}
-
-provider "helm" {
-  kubernetes {
-    config_path = "~/.kube/config"
-  }
 }
 
 module "argocd" {
@@ -121,6 +122,25 @@ EOF
   depends_on = [module.eks, helm_release.argo_workflows]
 }
 
+# setup aws credentials as EKS secrets
+resource "kubernetes_secret" "aws_creds" {
+  metadata {
+    name      = var.aws_creds_secret_name
+    namespace = "argo"
+  }
+
+  data = {
+    aws_access_key_id     = var.aws_access_key_id
+    aws_secret_access_key = var.aws_secret_access_key
+  }
+  
+  type = "Opaque"
+
+  depends_on = [module.eks]
+}
+
+
+
 resource "null_resource" "update_kubeconfig" {
   depends_on = [module.eks]
 
@@ -176,7 +196,7 @@ module "argocd_app" {
   depends_on = [module.argocd_secret]
 }
 
-module "argo_events" {
+module "argo_build_workflow" {
   source            = "./modules/argo-events"
   gitea_user        = module.gitea.admin_username
   gitea_token       = module.gitea_token.gitea_token
@@ -198,13 +218,14 @@ module "build_test_retag_workflow_v1" {
   aws_region     = var.region
   image_tag      = "v1.0.0"
 
-  depends_on = [module.argo_events]
+  depends_on = [module.argo_build_workflow]
 }
 
 module "ecr_event_bridge_to_argoworkflow" {
   source        = "./modules/event-bridge"
   ecr_repo_name = var.ecr_repo_name
   aws_region    = var.region
+  aws_creds_secret_name = var.aws_creds_secret_name
   tags          = var.tags
 
   depends_on = [module.build_test_retag_workflow_v1]

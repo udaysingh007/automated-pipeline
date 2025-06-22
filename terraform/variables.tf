@@ -60,6 +60,24 @@ variable "target_node_name" {
   default     = "node-with-pv"
 }
 
+variable "aws_access_key_id" {
+  description = "AWS Access Key ID"
+  type        = string
+  sensitive   = true
+}
+
+variable "aws_secret_access_key" {
+  description = "AWS Secret Access Key"
+  type        = string
+  sensitive   = true
+}
+
+variable "aws_creds_secret_name" {
+  description = "Kubernetes secret name that stores AWS credentials"
+  type        = string
+  default     = "aws-creds"
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

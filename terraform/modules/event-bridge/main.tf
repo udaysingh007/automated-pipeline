@@ -91,5 +91,7 @@ resource "kubectl_manifest" "sns_eventsource" {
     namespace     = "argo"
     aws_region    = var.aws_region
     sns_topic_arn = aws_sns_topic.ecr_events.arn
+    aws_creds_secret_name = var.aws_creds_secret_name    
   })
 }
+

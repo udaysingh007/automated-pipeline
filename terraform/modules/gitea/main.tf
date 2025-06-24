@@ -62,24 +62,24 @@ resource "helm_release" "gitea" {
   # Use the values.yaml template
   values = [
     templatefile("${path.module}/values.yaml.tpl", {
-      admin_username     = var.admin_username
-      admin_password     = var.admin_password
-      admin_email        = var.admin_email
-      domain            = var.domain
-      root_url          = var.root_url
-      postgres_username = var.postgres_username
-      postgres_password = var.postgres_password
-      postgres_database = var.postgres_database
-      secret_key        = random_password.gitea_secret_key.result
-      service_type      = var.service_type
-      ingress_enabled   = var.ingress_enabled
-      ingress_class     = var.ingress_class
-      resource_limits_cpu    = var.resource_limits_cpu
-      resource_limits_memory = var.resource_limits_memory
+      admin_username           = var.admin_username
+      admin_password           = var.admin_password
+      admin_email              = var.admin_email
+      domain                   = var.domain
+      root_url                 = var.root_url
+      postgres_username        = var.postgres_username
+      postgres_password        = var.postgres_password
+      postgres_database        = var.postgres_database
+      secret_key               = random_password.gitea_secret_key.result
+      service_type             = var.service_type
+      ingress_enabled          = var.ingress_enabled
+      ingress_class            = var.ingress_class
+      resource_limits_cpu      = var.resource_limits_cpu
+      resource_limits_memory   = var.resource_limits_memory
       resource_requests_cpu    = var.resource_requests_cpu
       resource_requests_memory = var.resource_requests_memory
-      release_name      = var.release_name
-    #   node_selector     = var.node_selector
+      release_name             = var.release_name
+      #   node_selector     = var.node_selector
     })
   ]
 

@@ -1,26 +1,68 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  generateName: go-app-build-
+  name: go-app-build
+  namespace: ${namespace}
 spec:
-  entrypoint: build-and-push
+  serviceAccountName: argo-workflows-server
+  entrypoint: build-and-push-steps
+  # Global nodeSelector to ensure all pods run on the same node
+  nodeSelector:
+    kubernetes.io/hostname: "${target_node_host_path}"  # Replace with actual node name
+    # Or use labels like: node-role.kubernetes.io/worker: "true"
   templates:
-    - name: build-and-push
+    # Main workflow with sequential steps
+    - name: build-and-push-steps
+      steps:
+      - - name: git-clone
+          template: git-clone
+      - - name: kaniko-build
+          template: kaniko-build
+
+    # Git clone template
+    - name: git-clone
+      nodeSelector:
+        kubernetes.io/hostname: "${target_node_host_path}"  # Replace with actual node name
       container:
-        image: docker:24
-        command: [sh, -c]
+        image: alpine/git
+        command: ["sh", "-c"]
         args:
-          - |
-            apk add --no-cache git curl bash build-base docker-cli && \
-            git clone "${repo_url}" && \
-            cd "$(basename ${repo_url} .git)" && \
-            docker build -t ${ecr_repo_url}:latest . && \
-            aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${ecr_repo_url} && \
-            docker push ${ecr_repo_url}:latest
+        - |
+          echo "Cloning repository..."
+          # Clean the directory first in case of previous runs
+          rm -rf /shared-workspace/source
+          mkdir -p /shared-workspace/source
+          git clone ${repo_url} /shared-workspace/source
+          ls -la /shared-workspace/source
+          echo "Repository cloned successfully"
         volumeMounts:
-          - name: docker-sock
-            mountPath: /var/run/docker.sock
+        - name: shared-workspace
+          mountPath: /shared-workspace
+
+    # Kaniko build template
+    - name: kaniko-build
+      nodeSelector:
+        kubernetes.io/hostname: "${target_node_host_path}"  # Replace with actual node name
+      container:
+        image: gcr.io/kaniko-project/executor:latest
+        command:
+        - /kaniko/executor
+        args:
+        - --dockerfile=/shared-workspace/source/Dockerfile
+        - --context=dir:///shared-workspace/source
+        - --destination=${ecr_repo_url}:latest
+        - --cache=true
+        - --cache-ttl=24h
+        volumeMounts:
+        - name: shared-workspace
+          mountPath: /shared-workspace
+        - name: kaniko-secret
+          mountPath: /kaniko/.docker
   volumes:
-    - name: docker-sock
+    - name: shared-workspace
       hostPath:
-        path: /var/run/docker.sock
+        path: /tmp/argo-workspace-{{workflow.uid}}  # Unique path per workflow
+        type: DirectoryOrCreate
+    - name: kaniko-secret
+      secret:
+        secretName: kaniko-docker-config

@@ -2,8 +2,9 @@ apiVersion: argoproj.io/v1alpha1
 kind: EventSource
 metadata:
   name: gitea
-  namespace: argo
+  namespace: "${namespace}"
 spec:
+  serviceAccountName: argo-workflows-server
   service:
     ports:
       - port: 12000
@@ -11,6 +12,5 @@ spec:
   webhook:
     gitea:
       endpoint: /push
-      port: 12000
+      port: "12000"
       method: POST
-      url: "${webhook_url}"

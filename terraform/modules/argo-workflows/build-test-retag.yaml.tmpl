@@ -1,62 +1,116 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  generateName: go-app-build-test-retag-
+  name: go-app-build-test-retag
+  namespace: ${namespace}
 spec:
+  serviceAccountName: argo-workflows-server
   entrypoint: build-test-retag
+  # Global node selector to ensure all pods run on the same node
+  nodeSelector:
+    kubernetes.io/hostname: ${target_node_host_path}
+  # Pod cleanup configuration
+  # podGC:
+  #  strategy: OnWorkflowCompletion
+  #  deleteDelayDuration: "30s"
+  
   templates:
   - name: build-test-retag
     steps:
-    - - name: build-image
-        template: build-image
     - - name: test-image
         template: test-image
-        when: "{{steps.build-image.outputs.result}} == Succeeded"
     - - name: retag-image
         template: retag-image
-        when: "{{steps.test-image.outputs.result}} == Succeeded"
+    - - name: cleanup
+        template: cleanup
 
-  - name: build-image
-    container:
-      image: docker:24
-      command: [sh, -c]
-      args:
-        - |
-          apk add --no-cache git bash build-base docker-cli && \
-          git clone "${repo_url}" && \
-          cd "$(basename ${repo_url} .git)" && \
-          docker build -t ${ecr_repo_url}:latest . && \
-          aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${ecr_repo_url} && \
-          docker push ${ecr_repo_url}:latest
-    volumeMounts:
-      - name: docker-sock
-        mountPath: /var/run/docker.sock
-    outputs:
-      result: "Succeeded"
-
+  # Test the built image
   - name: test-image
+    nodeSelector:
+      kubernetes.io/hostname: ${target_node_host_path}
     container:
       image: "${ecr_repo_url}:latest"
-      command: ["go", "test", "./..."]
-    outputs:
-      result: "Succeeded"
-
-  - name: retag-image
-    container:
-      image: docker:24
       command: [sh, -c]
       args:
         - |
-          aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${ecr_repo_url} && \
-          docker pull ${ecr_repo_url}:latest && \
-          docker tag ${ecr_repo_url}:latest ${ecr_repo_url}:${tag} && \
-          docker push ${ecr_repo_url}:${tag}
-    volumeMounts:
-      - name: docker-sock
-        mountPath: /var/run/docker.sock
+          echo "Running Go tests..."
+          echo "Source directory contents:"
+          ls -la /workspace/source
+          
+          # Set Go environment variables for testing
+          export CGO_ENABLED=0
+          export GOOS=linux
+          
+          # Change to source directory to run tests
+          cd /workspace/source
+          
+          # Run tests with verbose output
+          go test -v ./...
+          
+          echo "Tests completed successfully"
+      volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      env:
+        - name: CGO_ENABLED
+          value: "0"
+        - name: GOOS
+          value: "linux"
+
+  # Retag image using crane (designed for copying/retagging images)
+  - name: retag-image
+    nodeSelector:
+      kubernetes.io/hostname: ${target_node_host_path}
+    container:
+      image: gcr.io/go-containerregistry/crane:debug
+      command: [sh, -c]
+      args:
+        - |
+          echo "Retagging image from latest to ${tag}..."
+          echo "Source: ${ecr_repo_url}:latest"
+          echo "Destination: ${ecr_repo_url}:${tag}"
+          
+          # Copy the image with new tag
+          crane cp "${ecr_repo_url}:latest" "${ecr_repo_url}:${tag}"
+          
+          echo "Successfully retagged image as ${ecr_repo_url}:${tag}"
+          
+          # Verify the new tag exists
+          echo "Verifying new tag..."
+          crane manifest "${ecr_repo_url}:${tag}" > /dev/null && echo "Tag verification successful"
+      volumeMounts:
+        - name: kaniko-secret
+          mountPath: /root/.docker
+      env:
+        - name: DOCKER_CONFIG
+          value: "/root/.docker"
+
+  # Cleanup workspace directory
+  - name: cleanup
+    nodeSelector:
+      kubernetes.io/hostname: ${target_node_host_path}
+    container:
+      image: alpine:latest
+      command: [sh, -c]
+      args:
+        - |
+          echo "Cleaning up workspace directory..."
+          rm -rf /workspace/*
+          echo "Workspace cleanup completed"
+      volumeMounts:
+        - name: workspace
+          mountPath: /workspace
 
   volumes:
-    - name: docker-sock
+    # Using hostPath for persistent storage across pods on the same node
+    - name: workspace
       hostPath:
-        path: /var/run/docker.sock
-
+        path: /tmp/argo-workspace-{{workflow.uid}}
+        type: DirectoryOrCreate
+    - name: kaniko-secret
+      secret:
+        secretName: kaniko-docker-config
+    - name: aws-creds
+      secret:
+        secretName: aws-creds
+        optional: true

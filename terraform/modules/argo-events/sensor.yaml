@@ -2,29 +2,196 @@ apiVersion: argoproj.io/v1alpha1
 kind: Sensor
 metadata:
   name: gitea-sensor
-  namespace: argo-events
+  namespace: argo
 spec:
+  serviceAccountName: argo-workflows-server
   dependencies:
     - name: gitea-dep
       eventSourceName: gitea
       eventName: gitea
+      filters:
+        data:
+          # Only trigger on pushes to main branch
+          - path: body.ref
+            type: string
+            value:
+              - "refs/heads/main"
   triggers:
     - template:
         name: workflow-trigger
         argoWorkflow:
+          operation: submit
           source:
             resource:
               apiVersion: argoproj.io/v1alpha1
               kind: Workflow
               metadata:
                 generateName: gitea-workflow-
+                namespace: argo
               spec:
-                entrypoint: build-and-push
+                serviceAccountName: argo-workflows-server
+                entrypoint: build-test-retag
+                nodeSelector:
+                  kubernetes.io/hostname: ${target_node_host_path}
+                arguments:
+                  parameters:
+                    - name: repo-url
+                      value: "{{ .Input.body.repository.clone_url }}"
+                    - name: commit-sha
+                      value: "{{ .Input.body.after }}"
+                    - name: timestamp
+                      value: "{{ now | date \"20060102-150405\" }}"
+                    - name: build-tag
+                      value: "{{ now | date \"20060102-150405\" }}"
+                    - name: final-tag
+                      value: "{{ .Input.body.after | substr 0 8 }}-{{ now | date \"20060102-150405\" }}"
+                    - name: ecr-repo-url
+                      value: "${ecr_repo_url}"
+                    - name: region
+                      value: "${region}"
+                
                 templates:
-                  - name: build-and-push
-                    container:
-                      image: docker:24
-                      command: [sh, -c]
-                      args:
-                        - |
-                          echo "TODO: Replace with docker build + push logic"
+                - name: build-test-retag
+                  steps:
+                  - - name: clone-repo
+                      template: clone-repo
+                  - - name: build-image
+                      template: build-image
+                  - - name: test-image
+                      template: test-image
+                  - - name: retag-image
+                      template: retag-image
+                  - - name: cleanup
+                      template: cleanup
+
+                # Clone the repository
+                - name: clone-repo
+                  nodeSelector:
+                    kubernetes.io/hostname: ${target_node_host_path}
+                  container:
+                    image: alpine/git:latest
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Cloning repository..."
+                        echo "Repository: {{workflow.parameters.repo-url}}"
+                        echo "Commit SHA: {{workflow.parameters.commit-sha}}"
+                        
+                        # Clone the repository
+                        git clone {{workflow.parameters.repo-url}} /workspace/source
+                        cd /workspace/source
+                        
+                        # Checkout specific commit
+                        git checkout {{workflow.parameters.commit-sha}}
+                        
+                        echo "Repository cloned successfully"
+                        ls -la /workspace/source
+                    volumeMounts:
+                      - name: workspace
+                        mountPath: /workspace
+
+                # Build the Go application using Kaniko
+                - name: build-image
+                  nodeSelector:
+                    kubernetes.io/hostname: ${target_node_host_path}
+                  container:
+                    image: gcr.io/kaniko-project/executor:latest
+                    command: ["/kaniko/executor"]
+                    args:
+                      - --dockerfile=/workspace/source/Dockerfile
+                      - --context=/workspace/source
+                      - --destination={{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.build-tag}}
+                      - --destination={{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.commit-sha}}
+                      - --cache=true
+                      - --cache-ttl=24h
+                    volumeMounts:
+                      - name: workspace
+                        mountPath: /workspace
+                      - name: kaniko-secret
+                        mountPath: /kaniko/.docker
+
+                # Test the built image
+                - name: test-image
+                  nodeSelector:
+                    kubernetes.io/hostname: ${target_node_host_path}
+                  container:
+                    image: "{{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.build-tag}}"
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Running Go tests..."
+                        echo "Source directory contents:"
+                        ls -la /workspace/source
+                        
+                        # Set Go environment variables for testing
+                        export CGO_ENABLED=0
+                        export GOOS=linux
+                        
+                        # Change to source directory to run tests
+                        cd /workspace/source
+                        
+                        # Run tests with verbose output
+                        go test -v ./...
+                        
+                        echo "Tests completed successfully"
+                    volumeMounts:
+                      - name: workspace
+                        mountPath: /workspace
+                    env:
+                      - name: CGO_ENABLED
+                        value: "0"
+                      - name: GOOS
+                        value: "linux"
+
+                # Retag image using crane
+                - name: retag-image
+                  nodeSelector:
+                    kubernetes.io/hostname: ${target_node_host_path}
+                  container:
+                    image: gcr.io/go-containerregistry/crane:debug
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Retagging image with version {{workflow.parameters.tag}}..."
+                        echo "Source: {{workflow.parameters.ecr-repo-url}}:latest"
+                        echo "Destination: {{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.tag}}"
+                        
+                        # Copy the image with new tag
+                        crane cp "{{workflow.parameters.ecr-repo-url}}:{{ now | date \"20060102-150405\" }}" "{{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.tag}}"
+                        
+                        echo "Successfully retagged image as {{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.tag}}"
+                        
+                        # Verify the new tag exists
+                        echo "Verifying new tag..."
+                        crane manifest "{{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.tag}}" > /dev/null && echo "Tag verification successful"
+                    volumeMounts:
+                      - name: kaniko-secret
+                        mountPath: /root/.docker
+                    env:
+                      - name: DOCKER_CONFIG
+                        value: "/root/.docker"
+
+                # Cleanup workspace directory
+                - name: cleanup
+                  nodeSelector:
+                    kubernetes.io/hostname: ${target_node_host_path}
+                  container:
+                    image: alpine:latest
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Cleaning up workspace directory..."
+                        rm -rf /workspace/*
+                        echo "Workspace cleanup completed"
+                    volumeMounts:
+                      - name: workspace
+                        mountPath: /workspace
+
+                volumes:
+                  - name: workspace
+                    hostPath:
+                      path: /tmp/argo-workspace-{{workflow.uid}}
+                      type: DirectoryOrCreate
+                  - name: kaniko-secret
+                    secret:
+                      secretName: kaniko-docker-config

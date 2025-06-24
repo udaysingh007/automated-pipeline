@@ -2,15 +2,15 @@ apiVersion: argoproj.io/v1alpha1
 kind: EventSource
 metadata:
   name: sns-eventsource
-  namespace: {{ .namespace }}
+  namespace: ${namespace }
 spec:
   sns:
     example:
-      region: {{ .aws_region }}
-      topicARN: {{ .sns_topic_arn }}
+      region: ${aws_region}
+      topicARN: ${sns_topic_arn}
       accessKey:
         key: aws_access_key_id
-        name: {{ .aws_creds_secret_name }}
+        name: ${aws_creds_secret_name}
       secretKey:
         key: aws_secret_access_key
-        name: {{ .aws_creds_secret_name }}
+        name: ${aws_creds_secret_name}

@@ -4,8 +4,31 @@ resource "null_resource" "generate_token" {
       curl -X POST ${var.gitea_base_url}/api/v1/users/${var.gitea_user}/tokens \
         -u ${var.gitea_user}:${var.gitea_password} \
         -H 'Content-Type: application/json' \
-        -d '{"name": "argocd-access"}' \
+        -d '{
+          "name": "tf-access",
+          "scopes": [
+            "read:activitypub",
+            "write:activitypub",
+            "read:admin",
+            "write:admin",
+            "read:issue",
+            "write:issue",
+            "read:misc",
+            "write:misc",
+            "read:notification",
+            "write:notification",
+            "read:organization",
+            "write:organization",
+            "read:package",
+            "write:package",
+            "read:repository",
+            "write:repository",
+            "read:user",
+            "write:user"
+          ]
+        }' \
         > ${path.module}/token.json
+
     EOT
   }
 
@@ -15,6 +38,8 @@ resource "null_resource" "generate_token" {
 }
 
 data "local_file" "token_data" {
+  depends_on = [null_resource.generate_token]
+  
   filename = "${path.module}/token.json"
 }
 

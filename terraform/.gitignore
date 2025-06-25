@@ -10,3 +10,4 @@ plan.json
 token.json
 terraform.tfstate.*
 terraform.tfstate
+.DS_STORE*

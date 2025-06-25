@@ -77,6 +77,11 @@ gitea:
     session:
       PROVIDER: memory
 
+    # Webhook configuration to allow internal cluster communication
+    webhook:
+      ALLOWED_HOST_LIST: "gitea-eventsource-svc.argo.svc.cluster.local,localhost,127.0.0.1,*.svc.cluster.local"
+      SKIP_TLS_VERIFY: true
+
   # Disable Gitea persistence
   persistence:
     enabled: false

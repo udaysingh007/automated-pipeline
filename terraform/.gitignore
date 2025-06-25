@@ -8,3 +8,5 @@ terraform.tfstate.backup
 tfplan.binary
 plan.json
 token.json
+terraform.tfstate.*
+terraform.tfstate

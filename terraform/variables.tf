@@ -44,14 +44,14 @@ variable "gitea_admin_password" {
   description = "Password for Gitea admin user"
   type        = string
   sensitive   = true
-  default     = "admin"
+  default     = "admin0007"
 }
 
 variable "postgres_password" {
   description = "Password for PostgreSQL database"
   type        = string
   sensitive   = true
-  default     = "admin"
+  default     = "admin0007"
 }
 
 variable "target_node_name" {

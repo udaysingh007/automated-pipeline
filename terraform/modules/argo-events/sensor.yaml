@@ -2,7 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Sensor
 metadata:
   name: gitea-sensor
-  namespace: argo
+  namespace: "${namespace}"
 spec:
   serviceAccountName: argo-workflows-server
   dependencies:
@@ -11,7 +11,6 @@ spec:
       eventName: gitea
       filters:
         data:
-          # Only trigger on pushes to main branch
           - path: body.ref
             type: string
             value:
@@ -32,31 +31,34 @@ spec:
                 serviceAccountName: argo-workflows-server
                 entrypoint: build-test-retag
                 nodeSelector:
-                  kubernetes.io/hostname: ${target_node_host_path}
+                  kubernetes.io/hostname: "${target_node_host_path}"
                 arguments:
                   parameters:
-                    - name: repo-url
-                      value: "{{ .Input.body.repository.clone_url }}"
+                    # These will be populated by the parameter bindings below
+                    - name: repo-path
+                      value: ""
                     - name: commit-sha
-                      value: "{{ .Input.body.after }}"
+                      value: ""
                     - name: timestamp
-                      value: "{{ now | date \"20060102-150405\" }}"
+                      value: ""
                     - name: build-tag
-                      value: "{{ now | date \"20060102-150405\" }}"
+                      value: ""
                     - name: final-tag
-                      value: "{{ .Input.body.after | substr 0 8 }}-{{ now | date \"20060102-150405\" }}"
+                      value: ""
                     - name: ecr-repo-url
                       value: "${ecr_repo_url}"
                     - name: region
                       value: "${region}"
+                    - name: gitea-base-url
+                      value: "${gitea_base_url}"
                 
                 templates:
                 - name: build-test-retag
                   steps:
-                  - - name: clone-repo
-                      template: clone-repo
-                  - - name: build-image
-                      template: build-image
+                  - - name: git-clone
+                      template: git-clone
+                  - - name: kaniko-build
+                      template: kaniko-build
                   - - name: test-image
                       template: test-image
                   - - name: retag-image
@@ -64,58 +66,73 @@ spec:
                   - - name: cleanup
                       template: cleanup
 
-                # Clone the repository
-                - name: clone-repo
+                # Git clone template
+                - name: git-clone
                   nodeSelector:
-                    kubernetes.io/hostname: ${target_node_host_path}
+                    kubernetes.io/hostname: "${target_node_host_path}"
                   container:
-                    image: alpine/git:latest
-                    command: [sh, -c]
+                    image: alpine/git
+                    command: ["sh", "-c"]
                     args:
-                      - |
-                        echo "Cloning repository..."
-                        echo "Repository: {{workflow.parameters.repo-url}}"
-                        echo "Commit SHA: {{workflow.parameters.commit-sha}}"
-                        
-                        # Clone the repository
-                        git clone {{workflow.parameters.repo-url}} /workspace/source
-                        cd /workspace/source
-                        
-                        # Checkout specific commit
-                        git checkout {{workflow.parameters.commit-sha}}
-                        
-                        echo "Repository cloned successfully"
-                        ls -la /workspace/source
+                    - |
+                      echo "Cloning repository..."
+                      echo "Gitea Base URL: {{workflow.parameters.gitea-base-url}}"
+                      echo "Repository Path: {{workflow.parameters.repo-path}}"
+                      echo "Commit SHA: {{workflow.parameters.commit-sha}}"
+                      
+                      # Parse the repository path from body.repository.name
+                      # This could be just "repo-name" or "owner/repo-name" format
+                      REPO_PATH="{{workflow.parameters.repo-path}}"
+                      echo "Raw repo path: $REPO_PATH"
+                      
+                      # Construct the full clone URL
+                      # Remove any leading/trailing slashes and ensure proper format
+                      REPO_PATH=$(echo "$REPO_PATH" | sed 's|^/||' | sed 's|/$||')
+                      CLONE_URL="{{workflow.parameters.gitea-base-url}}/$REPO_PATH.git"
+                      echo "Full Clone URL: $CLONE_URL"
+                      
+                      # Clean the directory first in case of previous runs
+                      rm -rf /workspace/source
+                      mkdir -p /workspace/source
+                      
+                      # Clone the repository
+                      git clone "${repo_url}" /workspace/source
+                      cd /workspace/source && git checkout {{workflow.parameters.commit-sha}}
+                      ls -la /workspace/source
+                      echo "Repository cloned successfully at commit {{workflow.parameters.commit-sha}}"
                     volumeMounts:
-                      - name: workspace
-                        mountPath: /workspace
+                    - name: workspace
+                      mountPath: /workspace
 
-                # Build the Go application using Kaniko
-                - name: build-image
+                # Kaniko build template
+                - name: kaniko-build
                   nodeSelector:
-                    kubernetes.io/hostname: ${target_node_host_path}
+                    kubernetes.io/hostname: "${target_node_host_path}"
                   container:
                     image: gcr.io/kaniko-project/executor:latest
-                    command: ["/kaniko/executor"]
+                    command:
+                    - /kaniko/executor
                     args:
-                      - --dockerfile=/workspace/source/Dockerfile
-                      - --context=/workspace/source
-                      - --destination={{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.build-tag}}
-                      - --destination={{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.commit-sha}}
-                      - --cache=true
-                      - --cache-ttl=24h
+                    - --dockerfile=/workspace/source/Dockerfile
+                    - --context=dir:///workspace/source
+                    - --destination={{workflow.parameters.ecr-repo-url}}:dev
+                    - --cache=true
+                    - --cache-ttl=24h
                     volumeMounts:
-                      - name: workspace
-                        mountPath: /workspace
-                      - name: kaniko-secret
-                        mountPath: /kaniko/.docker
+                    - name: workspace
+                      mountPath: /workspace
+                    - name: kaniko-secret
+                      mountPath: /kaniko/.docker
+                    env:
+                      - name: DOCKER_CONFIG
+                        value: "/kaniko/.docker"
 
                 # Test the built image
                 - name: test-image
                   nodeSelector:
-                    kubernetes.io/hostname: ${target_node_host_path}
+                    kubernetes.io/hostname: "${target_node_host_path}"
                   container:
-                    image: "{{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.build-tag}}"
+                    image: "{{workflow.parameters.ecr-repo-url}}:dev"
                     command: [sh, -c]
                     args:
                       - |
@@ -146,24 +163,24 @@ spec:
                 # Retag image using crane
                 - name: retag-image
                   nodeSelector:
-                    kubernetes.io/hostname: ${target_node_host_path}
+                    kubernetes.io/hostname: "${target_node_host_path}"
                   container:
                     image: gcr.io/go-containerregistry/crane:debug
                     command: [sh, -c]
                     args:
                       - |
-                        echo "Retagging image with version {{workflow.parameters.tag}}..."
-                        echo "Source: {{workflow.parameters.ecr-repo-url}}:latest"
-                        echo "Destination: {{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.tag}}"
+                        echo "Retagging image with 'latest' tag"
+                        echo "Source: {{workflow.parameters.ecr-repo-url}}:dev"
+                        echo "Destination: {{workflow.parameters.ecr-repo-url}}:latest"
                         
                         # Copy the image with new tag
-                        crane cp "{{workflow.parameters.ecr-repo-url}}:{{ now | date \"20060102-150405\" }}" "{{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.tag}}"
+                        crane cp "{{workflow.parameters.ecr-repo-url}}:dev" "{{workflow.parameters.ecr-repo-url}}:latest"
                         
-                        echo "Successfully retagged image as {{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.tag}}"
+                        echo "Successfully retagged image as {{workflow.parameters.ecr-repo-url}}:latest"
                         
                         # Verify the new tag exists
                         echo "Verifying new tag..."
-                        crane manifest "{{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.tag}}" > /dev/null && echo "Tag verification successful"
+                        crane manifest "{{workflow.parameters.ecr-repo-url}}:latest" > /dev/null && echo "Tag verification successful"
                     volumeMounts:
                       - name: kaniko-secret
                         mountPath: /root/.docker
@@ -174,7 +191,7 @@ spec:
                 # Cleanup workspace directory
                 - name: cleanup
                   nodeSelector:
-                    kubernetes.io/hostname: ${target_node_host_path}
+                    kubernetes.io/hostname: "${target_node_host_path}"
                   container:
                     image: alpine:latest
                     command: [sh, -c]
@@ -195,3 +212,35 @@ spec:
                   - name: kaniko-secret
                     secret:
                       secretName: kaniko-docker-config
+          
+          # THIS IS THE KEY PART - Parameter bindings from webhook to workflow
+          parameters:
+            # Extract repository path from webhook payload (could be "repo" or "owner/repo")
+            - src:
+                dependencyName: gitea-dep
+                dataKey: body.repository.name
+              dest: spec.arguments.parameters.0.value  # repo-path parameter
+            
+            # Extract commit SHA from webhook payload
+            - src:
+                dependencyName: gitea-dep
+                dataKey: body.after
+              dest: spec.arguments.parameters.1.value  # commit-sha parameter
+            
+            # Generate timestamp using sprig function
+            - src:
+                dependencyName: gitea-dep
+                value: "{{ now | date \"20060102-150405\" }}"
+              dest: spec.arguments.parameters.2.value  # timestamp parameter
+            
+            # Generate build tag (same as timestamp)
+            - src:
+                dependencyName: gitea-dep
+                value: "{{ now | date \"20060102-150405\" }}"
+              dest: spec.arguments.parameters.3.value  # build-tag parameter
+            
+            # Generate final tag (commit SHA prefix + timestamp)
+            - src:
+                dependencyName: gitea-dep
+                dataTemplate: "{{ .Input.body.after | substr 0 8 }}-{{ now | date \"20060102-150405\" }}"
+              dest: spec.arguments.parameters.4.value  # final-tag parameter

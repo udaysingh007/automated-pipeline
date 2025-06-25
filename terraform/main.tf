@@ -185,6 +185,12 @@ resource "kubernetes_cluster_role_binding" "argo_workflows_binding" {
     name      = "argo-workflows-server"
     namespace = "argo"
   }
+
+  subject {
+    kind      = "ServiceAccount"
+    name      = "default"
+    namespace = "argo"
+  }
 }
 
 resource "helm_release" "argo_events" {

@@ -59,7 +59,14 @@ resource "kubectl_manifest" "event_source" {
 }
 
 resource "kubectl_manifest" "sensor" {
-  yaml_body = file("${path.module}/sensor.yaml")
+  yaml_body = templatefile("${path.module}/sensor.yaml", {
+    namespace             = var.argo_namespace
+    target_node_host_path = var.target_node_host_path
+    gitea_base_url        = var.gitea_base_url
+    repo_url              = "${var.gitea_base_url}/${var.gitea_user}/${var.repo_name}.git",
+    ecr_repo_url          = var.ecr_repo_url,
+    region                = var.aws_region
+  })
 }
 
 # Use null_resource to login to ECR and save Docker config

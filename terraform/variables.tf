@@ -87,3 +87,10 @@ variable "tags" {
     env = "dev"
   }
 }
+
+variable "webhook_token" {
+  description = "Custom webhook token (optional - will generate if not provided)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}

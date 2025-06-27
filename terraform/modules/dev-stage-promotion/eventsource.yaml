@@ -1,0 +1,20 @@
+# dev-stage-promotion-eventsource.yaml.tmpl
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: webhook-eventsource
+  namespace: "${namespace}"
+spec:
+  serviceAccountName: argo-workflows-server
+  service:
+    ports:
+      - port: 12000
+        targetPort: 12000
+  webhook:
+    build-complete:
+      port: "12000"
+      endpoint: /webhook
+      method: POST
+      authSecret:
+        name: webhook-secret
+        key: token

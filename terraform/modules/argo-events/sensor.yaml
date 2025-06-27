@@ -63,6 +63,8 @@ spec:
                       template: test-image
                   - - name: retag-image
                       template: retag-image
+                  - - name: trigger-promotion
+                      template: trigger-dev-stage-promotion
                   - - name: cleanup
                       template: cleanup
 
@@ -90,13 +92,13 @@ spec:
                       REPO_PATH=$(echo "$REPO_PATH" | sed 's|^/||' | sed 's|/$||')
                       CLONE_URL="{{workflow.parameters.gitea-base-url}}/$REPO_PATH.git"
                       echo "Full Clone URL: $CLONE_URL"
-                      
+
                       # Clean the directory first in case of previous runs
                       rm -rf /workspace/source
                       mkdir -p /workspace/source
                       
-                      # Clone the repository
-                      git clone "${repo_url}" /workspace/source
+                      # Clone the repository using the constructed URL
+                      git clone "$CLONE_URL" /workspace/source
                       cd /workspace/source && git checkout {{workflow.parameters.commit-sha}}
                       ls -la /workspace/source
                       echo "Repository cloned successfully at commit {{workflow.parameters.commit-sha}}"
@@ -115,7 +117,7 @@ spec:
                     args:
                     - --dockerfile=/workspace/source/Dockerfile
                     - --context=dir:///workspace/source
-                    - --destination={{workflow.parameters.ecr-repo-url}}:dev
+                    - --destination={{workflow.parameters.ecr-repo-url}}:dev,{{workflow.parameters.ecr-repo-url}}:{{workflow.parameters.commit-sha}}
                     - --cache=true
                     - --cache-ttl=24h
                     volumeMounts:
@@ -188,6 +190,62 @@ spec:
                       - name: DOCKER_CONFIG
                         value: "/root/.docker"
 
+                # Trigger dev to stage promotion
+                - name: trigger-dev-stage-promotion
+                  nodeSelector:
+                    kubernetes.io/hostname: "${target_node_host_path}"
+                  container:
+                    image: curlimages/curl:latest
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Triggering dev to stage promotion workflow via webhook..."
+                        
+                        # Prepare webhook payload with image details
+                        WEBHOOK_PAYLOAD=$$(cat <<EOF
+                        {
+                          "repository-name": "{{workflow.parameters.repo-path}}",
+                          "image-tag": "{{workflow.parameters.build-tag}}",
+                          "image-digest": "{{workflow.parameters.commit-sha}}",
+                          "ecr-repo-url": "{{workflow.parameters.ecr-repo-url}}",
+                          "region": "{{workflow.parameters.region}}",
+                          "timestamp": "$$(date -u +%Y%m%d-%H%M%S)"
+                        }
+                        EOF
+                        )
+                        
+                        echo "Webhook payload:"
+                        echo "$WEBHOOK_PAYLOAD"
+                        
+                        # Send webhook request
+                        RESPONSE=$$(curl -s -w "\n%%{http_code}" \
+                          -X POST \
+                          -H "Content-Type: application/json" \
+                          -H "Authorization: Bearer $WEBHOOK_TOKEN" \
+                          -d "$WEBHOOK_PAYLOAD" \
+                          "$WEBHOOK_URL")
+                        
+                        HTTP_CODE=$$(echo "$RESPONSE" | tail -n1)
+                        RESPONSE_BODY=$$(echo "$RESPONSE" | head -n -1)
+                        
+                        echo "HTTP Response Code: $HTTP_CODE"
+                        echo "Response Body: $RESPONSE_BODY"
+                        
+                        if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 201 ] || [ "$HTTP_CODE" -eq 202 ]; then
+                          echo "Webhook triggered successfully"
+                        else
+                          echo "Webhook failed with code $HTTP_CODE"
+                          exit 1
+                        fi
+                    env:
+                      - name: WEBHOOK_URL
+                        value: "http://webhook-eventsource-svc.${namespace}.svc.cluster.local:12000/webhook"
+                      - name: WEBHOOK_TOKEN
+                        valueFrom:
+                          secretKeyRef:
+                            name: webhook-secret
+                            key: token
+
                 # Cleanup workspace directory
                 - name: cleanup
                   nodeSelector:
@@ -207,40 +265,40 @@ spec:
                 volumes:
                   - name: workspace
                     hostPath:
-                      path: /tmp/argo-workspace-{{workflow.uid}}
+                      path: "/tmp/argo-workspace-{{workflow.uid}}"
                       type: DirectoryOrCreate
                   - name: kaniko-secret
                     secret:
                       secretName: kaniko-docker-config
           
-          # THIS IS THE KEY PART - Parameter bindings from webhook to workflow
+          # Parameter bindings from webhook to workflow
           parameters:
-            # Extract repository path from webhook payload (could be "repo" or "owner/repo")
+            # Extract repository path from webhook payload
             - src:
                 dependencyName: gitea-dep
                 dataKey: body.repository.name
-              dest: spec.arguments.parameters.0.value  # repo-path parameter
+              dest: spec.arguments.parameters.0.value
             
             # Extract commit SHA from webhook payload
             - src:
                 dependencyName: gitea-dep
                 dataKey: body.after
-              dest: spec.arguments.parameters.1.value  # commit-sha parameter
+              dest: spec.arguments.parameters.1.value
             
             # Generate timestamp using sprig function
             - src:
                 dependencyName: gitea-dep
                 value: "{{ now | date \"20060102-150405\" }}"
-              dest: spec.arguments.parameters.2.value  # timestamp parameter
+              dest: spec.arguments.parameters.2.value
             
             # Generate build tag (same as timestamp)
             - src:
                 dependencyName: gitea-dep
                 value: "{{ now | date \"20060102-150405\" }}"
-              dest: spec.arguments.parameters.3.value  # build-tag parameter
+              dest: spec.arguments.parameters.3.value
             
             # Generate final tag (commit SHA prefix + timestamp)
             - src:
                 dependencyName: gitea-dep
                 dataTemplate: "{{ .Input.body.after | substr 0 8 }}-{{ now | date \"20060102-150405\" }}"
-              dest: spec.arguments.parameters.4.value  # final-tag parameter
+              dest: spec.arguments.parameters.4.value

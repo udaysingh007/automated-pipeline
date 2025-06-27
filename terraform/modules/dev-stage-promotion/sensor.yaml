@@ -1,0 +1,194 @@
+# dev-stage-promotion-sensor.yaml.tmpl
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: dev-stage-promotion-sensor
+  namespace: "${namespace}"
+spec:
+  serviceAccountName: argo-workflows-server
+  dependencies:
+    - name: webhook-dep
+      eventSourceName: webhook-eventsource
+      eventName: build-complete
+  triggers:
+    - template:
+        name: dev-stage-promotion-trigger
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: dev-stage-promotion-workflow-
+                namespace: argo
+              spec:
+                serviceAccountName: argo-workflows-server
+                entrypoint: dev-stage-promotion-pipeline
+                nodeSelector:
+                  kubernetes.io/hostname: "${target_node_host_path}"
+                arguments:
+                  parameters:
+                    - name: repo-name
+                      value: ""
+                    - name: image-tag
+                      value: ""
+                    - name: image-digest
+                      value: ""
+                    - name: ecr-repo-url
+                      value: "${ecr_repo_url}"
+                    - name: region
+                      value: "${region}"
+                    - name: timestamp
+                      value: ""
+                
+                templates:
+                - name: dev-stage-promotion-pipeline
+                  steps:
+                  - - name: pull-image
+                      template: pull-image
+                  - - name: test-image
+                      template: test-image
+                  - - name: retag-image
+                      template: retag-image
+                  - - name: cleanup
+                      template: cleanup
+
+                # Verify image accessibility
+                - name: pull-image
+                  nodeSelector:
+                    kubernetes.io/hostname: "${target_node_host_path}"
+                  container:
+                    image: gcr.io/go-containerregistry/crane:debug
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Verifying image accessibility..."
+                        echo "Source image: {{workflow.parameters.ecr-repo-url}}:dev"
+                        
+                        # Verify image exists and is accessible
+                        crane manifest "{{workflow.parameters.ecr-repo-url}}:dev" > /dev/null
+                        
+                        if [ $? -eq 0 ]; then
+                          echo "Image exists and is accessible"
+                        else
+                          echo "Failed to access image"
+                          exit 1
+                        fi
+                    volumeMounts:
+                      - name: kaniko-secret
+                        mountPath: /root/.docker
+                    env:
+                      - name: DOCKER_CONFIG
+                        value: "/root/.docker"
+
+                # Test the image
+                - name: test-image
+                  nodeSelector:
+                    kubernetes.io/hostname: "${target_node_host_path}"
+                  container:
+                    image: "{{workflow.parameters.ecr-repo-url}}:dev"
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Running tests on the built image..."
+                        echo "Repository: {{workflow.parameters.repo-name}}"
+                        echo "Image tag: dev"
+                        
+                        # Set Go environment variables for testing
+                        export CGO_ENABLED=0
+                        export GOOS=linux
+                        
+                        # Check if we're in a Go project
+                        if [ -f "go.mod" ]; then
+                          echo "Found go.mod, running Go tests..."
+                          go test -v ./...
+                        else
+                          echo "No go.mod found, running basic validation..."
+                          # Add your custom validation logic here
+                          echo "Image validation completed"
+                        fi
+                        
+                        echo "Tests completed successfully"
+                    env:
+                      - name: CGO_ENABLED
+                        value: "0"
+                      - name: GOOS
+                        value: "linux"
+
+                # Retag image using crane
+                - name: retag-image
+                  nodeSelector:
+                    kubernetes.io/hostname: "${target_node_host_path}"
+                  container:
+                    image: gcr.io/go-containerregistry/crane:debug
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Retagging image after successful tests..."
+                        echo "Source: {{workflow.parameters.ecr-repo-url}}:dev"
+                        echo "Destination: {{workflow.parameters.ecr-repo-url}}:stage"
+                        
+                        # Copy the image with new tag
+                        crane cp "{{workflow.parameters.ecr-repo-url}}:dev" "{{workflow.parameters.ecr-repo-url}}:stage"
+                        
+                        echo "Successfully retagged image as stage"
+                        
+                        # Also create a timestamped tag for versioning
+                        TIMESTAMP_TAG="stage-{{workflow.parameters.timestamp}}"
+                        crane cp "{{workflow.parameters.ecr-repo-url}}:dev" "{{workflow.parameters.ecr-repo-url}}:$TIMESTAMP_TAG"
+                        
+                        echo "Also tagged as: $TIMESTAMP_TAG"
+                        
+                        # Verify the new tags exist
+                        echo "Verifying new tags..."
+                        crane manifest "{{workflow.parameters.ecr-repo-url}}:stage" > /dev/null && echo "Stage tag verification successful"
+                        crane manifest "{{workflow.parameters.ecr-repo-url}}:$TIMESTAMP_TAG" > /dev/null && echo "Timestamped tag verification successful"
+                    volumeMounts:
+                      - name: kaniko-secret
+                        mountPath: /root/.docker
+                    env:
+                      - name: DOCKER_CONFIG
+                        value: "/root/.docker"
+
+                # Cleanup
+                - name: cleanup
+                  nodeSelector:
+                    kubernetes.io/hostname: "${target_node_host_path}"
+                  container:
+                    image: alpine:latest
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Cleaning up any temporary resources..."
+                        echo "Dev to stage promotion workflow completed successfully"
+                        echo "Final tags created:"
+                        echo "  - {{workflow.parameters.ecr-repo-url}}:stage"
+                        echo "  - {{workflow.parameters.ecr-repo-url}}:stage-{{workflow.parameters.timestamp}}"
+
+                volumes:
+                  - name: kaniko-secret
+                    secret:
+                      secretName: kaniko-docker-config
+          
+          # Parameter bindings from webhook payload to workflow
+          parameters:
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.repository-name
+              dest: spec.arguments.parameters.0.value  # repo-name parameter
+            
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.image-tag
+              dest: spec.arguments.parameters.1.value  # image-tag parameter
+            
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.image-digest
+              dest: spec.arguments.parameters.2.value  # image-digest parameter
+            
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.timestamp
+              dest: spec.arguments.parameters.5.value  # timestamp parameter

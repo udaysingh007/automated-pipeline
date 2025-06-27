@@ -54,7 +54,7 @@ variable "aws_region" {
 
 resource "kubectl_manifest" "event_source" {
   yaml_body = templatefile("${path.module}/event-source.yaml.tmpl", {
-    namespace   = var.argo_namespace
+    namespace = var.argo_namespace
   })
 }
 
@@ -139,13 +139,13 @@ resource "null_resource" "create_gitea_webhook" {
     fi
     EOT
   }
-  
+
   triggers = {
     repo = var.repo_name
     # Add more triggers to force recreation if needed
     webhook_url = "http://gitea-eventsource-svc.${var.argo_namespace}.svc.cluster.local:12000/push"
   }
-  
+
   depends_on = [
     kubectl_manifest.event_source
   ]

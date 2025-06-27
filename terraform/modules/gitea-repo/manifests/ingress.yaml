@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello-world-go-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: your-domain.com  # Replace with your actual domain
+    http:
+      paths:
+      - path: /repo1(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: hello-world-go-service
+            port:
+              number: 80

@@ -47,7 +47,7 @@ data "kubernetes_nodes" "all" {}
 # Local value to get the first node's hostname label
 locals {
   target_node_for_host_path = data.kubernetes_nodes.all.nodes[0].metadata[0].labels["kubernetes.io/hostname"]
-  target_node_for_ebus = data.kubernetes_nodes.all.nodes[1].metadata[0].labels["kubernetes.io/hostname"]
+  target_node_for_ebus      = data.kubernetes_nodes.all.nodes[1].metadata[0].labels["kubernetes.io/hostname"]
 }
 
 module "argocd" {
@@ -209,8 +209,8 @@ EOF
 }
 
 module "ebus" {
-  source = "./modules/event-bus"
-  namespace    = "argo"
+  source              = "./modules/event-bus"
+  namespace           = "argo"
   node_selector_value = local.target_node_for_ebus
 
   depends_on = [helm_release.argo_events]
@@ -233,8 +233,6 @@ resource "kubernetes_secret" "aws_creds" {
 
   depends_on = [module.argocd]
 }
-
-
 
 resource "null_resource" "update_kubeconfig" {
   depends_on = [module.eks]
@@ -345,12 +343,31 @@ module "build_test_retag_workflow_v1" {
   depends_on = [module.argo_build_workflow]
 }
 
-module "ecr_event_bridge_to_argoworkflow" {
-  source                = "./modules/event-bridge"
-  ecr_repo_name         = var.ecr_repo_name
-  aws_region            = var.region
-  aws_creds_secret_name = var.aws_creds_secret_name
-  tags                  = var.tags
+# module "dev_stage_promotion" {
+#   source = "./modules/dev-stage-promotion"
 
-  depends_on = [module.build_test_retag_workflow_v1]
-}
+#   # Required variables
+#   target_node_host_path = var.target_node_name
+#   ecr_repo_url         = module.ecr.ecr_repository_url
+
+#   # Optional variables with defaults
+#   namespace     = "argo"
+#   region        = var.region
+#   webhook_token = var.webhook_token
+
+#   # Ensure namespaces exist before creating resources
+#   depends_on = [module.argo_build_workflow]
+# }
+
+# module "ecr_event_bridge_to_argoworkflow" {
+#   source                = "./modules/event-bridge"
+#   cluster_name          = var.cluster_name
+#   repo_name             = var.ecr_repo_name
+#   ecr_repo_url          = module.ecr.ecr_repository_url
+#   aws_region            = var.region
+#   aws_creds_secret_name = var.aws_creds_secret_name
+#   tags                  = var.tags
+#   target_node_host_path = local.target_node_for_host_path
+
+#   depends_on = [module.build_test_retag_workflow_v1]
+# }

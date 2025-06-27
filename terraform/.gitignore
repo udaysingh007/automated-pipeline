@@ -9,5 +9,5 @@ tfplan.binary
 plan.json
 token.json
 terraform.tfstate.*
-terraform.tfstate
+terraform.tfstate*
 .DS_STORE*

@@ -1,0 +1,184 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: sns-sensor
+  namespace: "${namespace}"
+spec:
+  serviceAccountName: argo-workflows-server
+  dependencies:
+    - name: sns-dep
+      eventSourceName: sns-eventsource
+      eventName: ecrEvents
+      filters:
+        data:
+          - path: body.detail.action-type
+            type: string
+            value:
+              - "PUSH"
+          - path: body.detail.result
+            type: string
+            value:
+              - "SUCCESS"
+  triggers:
+    - template:
+        name: workflow-trigger
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: ecr-sns-workflow-
+                namespace: argo
+              spec:
+                serviceAccountName: argo-workflows-server
+                entrypoint: build-test-retag
+                nodeSelector:
+                  kubernetes.io/hostname: "${target_node_host_path}"
+                arguments:
+                  parameters:
+                    # These will be populated by the parameter bindings below
+                    - name: repo-path
+                      value: ""
+                    - name: commit-sha
+                      value: ""
+                    - name: timestamp
+                      value: ""
+                    - name: build-tag
+                      value: ""
+                    - name: final-tag
+                      value: ""
+                    - name: ecr-repo-url
+                      value: "${ecr_repo_url}"
+                    - name: region
+                      value: "${region}"
+                
+                templates:
+                - name: build-test-retag
+                  steps:
+                  - - name: test-image
+                      template: test-image
+                  - - name: retag-image
+                      template: retag-image
+                  - - name: cleanup
+                      template: cleanup
+
+                # Test the built image
+                - name: test-image
+                  nodeSelector:
+                    kubernetes.io/hostname: "${target_node_host_path}"
+                  container:
+                    image: "{{workflow.parameters.ecr-repo-url}}:dev"
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Running Go tests..."
+                        echo "Source directory contents:"
+                        ls -la /workspace/source
+                        
+                        # Set Go environment variables for testing
+                        export CGO_ENABLED=0
+                        export GOOS=linux
+                        
+                        # Change to source directory to run tests
+                        cd /workspace/source
+                        
+                        # Run tests with verbose output
+                        go test -v ./...
+                        
+                        echo "Tests completed successfully"
+                    volumeMounts:
+                      - name: workspace
+                        mountPath: /workspace
+                    env:
+                      - name: CGO_ENABLED
+                        value: "0"
+                      - name: GOOS
+                        value: "linux"
+
+                # Retag image using crane
+                - name: retag-image
+                  nodeSelector:
+                    kubernetes.io/hostname: "${target_node_host_path}"
+                  container:
+                    image: gcr.io/go-containerregistry/crane:debug
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Retagging image with 'latest' tag"
+                        echo "Source: {{workflow.parameters.ecr-repo-url}}:latest"
+                        echo "Destination: {{workflow.parameters.ecr-repo-url}}:stage"
+                        
+                        # Copy the image with new tag
+                        crane cp "{{workflow.parameters.ecr-repo-url}}:dev" "{{workflow.parameters.ecr-repo-url}}:stage"
+                        
+                        echo "Successfully retagged image as {{workflow.parameters.ecr-repo-url}}:stage"
+                        
+                        # Verify the new tag exists
+                        echo "Verifying new tag..."
+                        crane manifest "{{workflow.parameters.ecr-repo-url}}:stage" > /dev/null && echo "Tag verification successful"
+                    volumeMounts:
+                      - name: kaniko-secret
+                        mountPath: /root/.docker
+                    env:
+                      - name: DOCKER_CONFIG
+                        value: "/root/.docker"
+
+                # Cleanup workspace directory
+                - name: cleanup
+                  nodeSelector:
+                    kubernetes.io/hostname: "${target_node_host_path}"
+                  container:
+                    image: alpine:latest
+                    command: [sh, -c]
+                    args:
+                      - |
+                        echo "Cleaning up workspace directory..."
+                        rm -rf /workspace/*
+                        echo "Workspace cleanup completed"
+                    volumeMounts:
+                      - name: workspace
+                        mountPath: /workspace
+
+                volumes:
+                  - name: workspace
+                    hostPath:
+                      path: /tmp/argo-workspace-{{workflow.uid}}
+                      type: DirectoryOrCreate
+                  - name: kaniko-secret
+                    secret:
+                      secretName: kaniko-docker-config
+          
+          # Parameter bindings from SNS ECR event to workflow
+          parameters:
+            # Extract repository name from ECR event
+            - src:
+                dependencyName: sns-dep
+                dataKey: body.detail.repository-name
+              dest: spec.arguments.parameters.0.value  # repo-path parameter
+            
+            # Extract image digest or use image tag as commit reference
+            # ECR events don't have git commit SHA, so we'll use image digest
+            - src:
+                dependencyName: sns-dep
+                dataKey: body.detail.image-digest
+              dest: spec.arguments.parameters.1.value  # commit-sha parameter
+            
+            # Generate timestamp using sprig function
+            - src:
+                dependencyName: sns-dep
+                value: "{{ now | date \"20060102-150405\" }}"
+              dest: spec.arguments.parameters.2.value  # timestamp parameter
+            
+            # Generate build tag from image tag
+            - src:
+                dependencyName: sns-dep
+                dataKey: body.detail.image-tag
+              dest: spec.arguments.parameters.3.value  # build-tag parameter
+            
+            # Generate final tag (image digest prefix + timestamp)
+            - src:
+                dependencyName: sns-dep
+                dataTemplate: "{{ .Input.body.detail.image-digest | substr 7 15 }}-{{ now | date \"20060102-150405\" }}"
+              dest: spec.arguments.parameters.4.value  # final-tag parame

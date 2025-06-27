@@ -5,17 +5,17 @@ metadata:
   namespace: ${namespace}
 spec:
   serviceAccountName: argo-workflows-server
+  eventBusName: default
   sns:
-    ecr-events:
+    ecrEvents:
       region: ${aws_region}
-      topicARN: ${sns_topic_arn}
+      topicArn: "${sns_topic_arn}"
       accessKey:
         key: aws_access_key_id
         name: ${aws_creds_secret_name}
       secretKey:
         key: aws_secret_access_key
         name: ${aws_creds_secret_name}
-      # Optional: Add validation settings
       validateSignature: true
-      # Optional: Add endpoint if using localstack or custom endpoint
-      # endpoint: ""
+      # Remove webhook configuration entirely
+      # EventSource will automatically create and manage an SQS queue
